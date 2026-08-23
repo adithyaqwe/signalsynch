@@ -1,0 +1,32 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-cream text-black antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  }
+}
+
+@layer components {
+  .card {
+    @apply bg-white border-3 border-black rounded-none shadow-brutal p-3.5;
+  }
+
+  .btn-neo {
+    @apply px-4 py-2 border-3 border-black font-bold shadow-brutal-sm
+           active:shadow-none active:translate-x-[3px] active:translate-y-[3px]
+           transition-all duration-100 cursor-pointer;
+  }
+
+  .badge-ok {
+    @apply inline-flex items-center px-3 py-1 border-2 border-black font-bold text-xs
+           bg-neo-green;
+  }
+
+  .badge-conflict {
+    @apply inline-flex items-center px-3 py-1 border-2 border-black font-bold text-xs
+           bg-neo-red text-white;
+  }
+}
