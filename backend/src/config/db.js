@@ -1,11 +1,9 @@
-const mongoose = require('mongoose');
-
 const connectDB = async () => {
   try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
-    console.log(`[MongoDB] Connected: ${conn.connection.host}`);
+    // Mongoose is bypassed; using in-memory MockModels
+    console.log(`[Database] Connected to In-Memory Mock Datastore`);
   } catch (error) {
-    console.error(`[MongoDB] Connection error: ${error.message}`);
+    console.error(`[Database] Connection error: ${error.message}`);
     process.exit(1);
   }
 };
