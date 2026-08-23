@@ -17,6 +17,37 @@ export default function App() {
   const sensorEvents = events[selectedSensor] || [];
   const latestEvent = latestEvents[selectedSensor];
 
+  const [isInjecting, setIsInjecting] = useState(false);
+
+  const handleForceAnomaly = async () => {
+    setIsInjecting(true);
+    triggerAnomaly();
+
+    if (!USE_MOCK) {
+      try {
+        const config = SENSOR_BASELINES[selectedSensor] || { base: 50 };
+        const base = config.base;
+        const now = new Date().toISOString();
+        const spike = (Math.random() > 0.5 ? 1 : -1) * (config.range ? config.range * 0.8 : 12.0);
+        const payload = [
+          { eventId: selectedSensor, source: 'SOURCE_A', value: parseFloat((base + 0.3).toFixed(2)), timestamp: now },
+          { eventId: selectedSensor, source: 'SOURCE_B', value: parseFloat((base - 0.2).toFixed(2)), timestamp: now },
+          { eventId: selectedSensor, source: 'SOURCE_C', value: parseFloat((base + spike).toFixed(2)), timestamp: now }
+        ];
+
+        await fetch(`${BACKEND_URL}/api/events`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify(payload)
+        });
+      } catch (err) {
+        console.error('Failed to post anomaly event to backend:', err);
+      }
+    }
+
+    setTimeout(() => setIsInjecting(false), 800);
+  };
+
   return (
     <div className="min-h-screen bg-cream">
       {/* ── Header ── */}
@@ -29,12 +60,16 @@ export default function App() {
             <h1 className="text-xl font-black uppercase tracking-tight">SignalSynch</h1>
           </div>
 
-          <div className="flex items-center gap-4">
-            {USE_MOCK && (
-              <button onClick={triggerAnomaly} className="btn-neo text-xs bg-neo-purple px-2 py-1 uppercase text-black">
-                ⚡ Force Anomaly
-              </button>
-            )}
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleForceAnomaly}
+              className={`btn-neo text-xs px-3 py-1.5 uppercase font-black tracking-wider transition-all ${
+                isInjecting ? 'bg-neo-red text-white scale-95' : 'bg-neo-purple text-black hover:bg-purple-300'
+              }`}
+              title="Inject a high-deviation anomaly to test ML conflict detection"
+            >
+              {isInjecting ? '🚨 INJECTING...' : '⚡ Force Anomaly'}
+            </button>
             <div className="flex items-center gap-2 border-3 border-black bg-white px-3 py-1 shadow-brutal-sm">
               {connectionStatus === 'connected' ? (
                 <Wifi className="w-4 h-4 text-green-700" />
