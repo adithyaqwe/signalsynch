@@ -7,12 +7,17 @@
 // ============================================================
 
 // ── Configuration ──────────────────────────────────────────────
-export const USE_MOCK = false; // Set to false when backend is live
-export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
+export const USE_MOCK = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_USE_MOCK !== undefined)
+  ? String(import.meta.env.VITE_USE_MOCK).toLowerCase() === 'true'
+  : false;
+
+export const BACKEND_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_BACKEND_URL)
+  ? String(import.meta.env.VITE_BACKEND_URL).replace(/\/+$/, '')
+  : 'http://localhost:5000';
 export const SSE_URL = `${BACKEND_URL}/stream`;
 export const POLL_URL = `${BACKEND_URL}/api/reconciliation`;
 export const AUDIT_URL = `${BACKEND_URL}/api/reconciliation`;
-export const HEALTH_URL = `${BACKEND_URL}/api/events`; // simple endpoint to check if up
+export const HEALTH_URL = `${BACKEND_URL}/api/health`;
 
 // ── Sensor Config ──────────────────────────────────────────────
 export const SENSORS = ['sensor_001', 'sensor_002', 'sensor_003', 'sensor_004', 'sensor_005', 'sensor_006', 'sensor_007', 'sensor_008', 'sensor_009', 'sensor_010'];
