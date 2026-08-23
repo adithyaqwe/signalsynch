@@ -13,11 +13,12 @@ def predict():
         val_A, val_B, val_C = None, None, None
         
         for e in events:
-            if e.get('source') == 'SOURCE_A':
+            src = str(e.get('source', '')).upper()
+            if src in ['SOURCE_A', 'A']:
                 val_A = e.get('value')
-            elif e.get('source') == 'SOURCE_B':
+            elif src in ['SOURCE_B', 'B']:
                 val_B = e.get('value')
-            elif e.get('source') == 'SOURCE_C':
+            elif src in ['SOURCE_C', 'C']:
                 val_C = e.get('value')
 
         # Run inference

@@ -33,8 +33,8 @@ const receiveEvent = async (req, res, next) => {
     
     // Trigger reconciliation asynchronously for each affected event group
     for (const eventId of eventGroupIds) {
-      // Find all recent readings for this event group
-      Event.find({ eventId }).then(eventGroup => {
+      // Find latest readings for this event group
+      Event.find({ eventId }).sort({ timestamp: -1 }).limit(3).then(eventGroup => {
         if (eventGroup.length >= 2) {
             runReconciliation(eventId, eventGroup).catch(err => {
               logger.error('Background reconciliation failed', { eventId, error: err.message });
