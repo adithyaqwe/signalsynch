@@ -109,6 +109,11 @@ class MockModel {
       return new MockQuery(result || null, true);
     };
 
+    Model.create = async function (data) {
+      const doc = new Model(data);
+      return doc.save();
+    };
+
     Model.findById = function (id) {
       return this.findOne({ _id: id });
     };
