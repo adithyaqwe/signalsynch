@@ -63,6 +63,10 @@ function normalizeLabel(status) {
     return normalized
   }
 
+  if (normalized === "auto_resolved" || normalized === "conflict_detected" || normalized === "human_review_required") {
+    return "conflicting"
+  }
+
   return null
 }
 

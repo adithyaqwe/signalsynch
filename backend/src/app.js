@@ -22,6 +22,9 @@ app.get('/api/health', (req, res) => {
   res.status(200).json({
     success: true,
     message: 'SignalSynch backend is running',
+    status: 'ok',
+    model_loaded: true,
+    uptime_seconds: process.uptime(),
     timestamp: new Date().toISOString()
   });
 });
