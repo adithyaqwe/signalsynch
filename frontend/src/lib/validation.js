@@ -1,11 +1,24 @@
 /**
- * Defensive validation + normalization for reconciliation payloads.
+ * SignalSynch frontend data adapter.
  *
- * The backend contract is authoritative. We never invent business values;
- * we only reject/ignore malformed events and coerce shapes we can trust.
+ * The backend and frontend use different field names.
+ * This file is the single boundary between them.
+ *
+ * Backend → Frontend:
+ *
+ * eventId              → reconciliation_id
+ * sensorId             → sensor_id
+ * timestamp            → timestamp
+ * sourceValues[]       → source_values { A, B, C }
+ * trustedValue         → trusted_value
+ * status               → ml_label
+ * confidence           → ml_confidence
+ * requiresHumanReview  → alert
+ * reason               → explanation
  */
 
 export const SOURCE_KEYS = ["A", "B", "C"]
+
 export const KNOWN_SENSORS = [
   "sensor_001",
   "sensor_002",
@@ -14,31 +27,216 @@ export const KNOWN_SENSORS = [
   "sensor_005",
 ]
 
-function isFiniteNumber(v) {
-  return typeof v === "number" && Number.isFinite(v)
+function isFiniteNumber(value) {
+  return typeof value === "number" && Number.isFinite(value)
 }
 
-/** A source value is valid if it is null OR a finite number. */
-function normalizeSourceValue(v) {
-  if (v === null || v === undefined) return null
-  if (isFiniteNumber(v)) return v
-  // Some backends may serialize numbers as strings — accept if parseable.
-  if (typeof v === "string" && v.trim() !== "" && Number.isFinite(Number(v))) {
-    return Number(v)
+function normalizeNumber(value) {
+  if (value === null || value === undefined || value === "") {
+    return null
   }
+
+  if (isFiniteNumber(value)) {
+    return value
+  }
+
+  if (
+    typeof value === "string" &&
+    value.trim() !== "" &&
+    Number.isFinite(Number(value))
+  ) {
+    return Number(value)
+  }
+
   return null
 }
 
+function normalizeLabel(status) {
+  if (typeof status !== "string") return null
+
+  const normalized = status.toLowerCase().trim()
+
+  if (
+    normalized === "consistent" ||
+    normalized === "conflicting"
+  ) {
+    return normalized
+  }
+
+  return null
+}
+
+function sourceNameToKey(source) {
+  if (typeof source !== "string") return null
+
+  const normalized = source
+    .toUpperCase()
+    .replace(/[\s-]/g, "_")
+
+  if (normalized === "SOURCE_A" || normalized === "A") {
+    return "A"
+  }
+
+  if (normalized === "SOURCE_B" || normalized === "B") {
+    return "B"
+  }
+
+  if (normalized === "SOURCE_C" || normalized === "C") {
+    return "C"
+  }
+
+  return null
+}
+
+function normalizeSourceValues(raw) {
+  const result = {
+    A: null,
+    B: null,
+    C: null,
+  }
+
+  /*
+   * Backend shape:
+   *
+   * [
+   *   { source: "SOURCE_A", value: 10 },
+   *   { source: "SOURCE_B", value: 10 },
+   *   { source: "SOURCE_C", value: 10 }
+   * ]
+   */
+  if (Array.isArray(raw)) {
+    for (const item of raw) {
+      if (!item || typeof item !== "object") continue
+
+      const key = sourceNameToKey(item.source)
+
+      if (key) {
+        result[key] = normalizeNumber(item.value)
+      }
+    }
+
+    return result
+  }
+
+  /*
+   * Also support the frontend/mock shape:
+   *
+   * { A: 10, B: 10, C: 10 }
+   */
+  if (raw && typeof raw === "object") {
+    for (const key of SOURCE_KEYS) {
+      result[key] = normalizeNumber(raw[key])
+    }
+  }
+
+  return result
+}
+
+function parseJSON(value) {
+  if (typeof value !== "string") return value
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
 /**
- * Validate and normalize a single reconciliation event.
- * Returns a normalized object on success, or null if the event is malformed.
- * Never throws.
+ * Normalize one backend reconciliation record into the
+ * internal shape expected by the existing React UI.
  */
 export function normalizeReconciliation(raw) {
   try {
-    if (!raw || typeof raw !== "object") return null
+    if (!raw || typeof raw !== "object") {
+      return null
+    }
 
-    const {
+    /*
+     * Accept both the current backend naming and the
+     * existing frontend/mock naming.
+     */
+    const reconciliation_id =
+      raw.eventId ??
+      raw.reconciliation_id ??
+      raw.id
+
+    const sensor_id =
+      raw.sensorId ??
+      raw.sensor_id ??
+      "—"
+
+    const timestamp =
+      raw.timestamp ??
+      raw.createdAt ??
+      raw.created_at
+
+    if (
+      typeof reconciliation_id !== "string" ||
+      reconciliation_id.trim() === ""
+    ) {
+      return null
+    }
+
+    if (
+      typeof timestamp !== "string" ||
+      timestamp.trim() === ""
+    ) {
+      return null
+    }
+
+    const source_values = normalizeSourceValues(
+      parseJSON(raw.sourceValues ?? raw.source_values),
+    )
+
+    const trusted_value = normalizeNumber(
+      raw.trustedValue ??
+      raw.trusted_value,
+    )
+
+    const ml_label =
+      normalizeLabel(raw.status) ??
+      normalizeLabel(raw.ml_label)
+
+    /*
+     * A reconciliation result needs a valid classification.
+     * If the backend is temporarily missing it, ignore the
+     * record rather than displaying misleading information.
+     */
+    if (!ml_label) {
+      return null
+    }
+
+    let ml_confidence = normalizeNumber(
+      raw.confidence ??
+      raw.ml_confidence,
+    )
+
+    if (ml_confidence === null) {
+      return null
+    }
+
+    /*
+     * Backend confidence should be 0..1.
+     */
+    ml_confidence = Math.min(
+      1,
+      Math.max(0, ml_confidence),
+    )
+
+    const alert =
+      Boolean(raw.requiresHumanReview) ||
+      Boolean(raw.alert) ||
+      ml_label === "conflicting"
+
+    const explanation =
+      typeof raw.reason === "string"
+        ? raw.reason
+        : typeof raw.explanation === "string"
+          ? raw.explanation
+          : ""
+
+    return {
       reconciliation_id,
       sensor_id,
       timestamp,
@@ -48,54 +246,19 @@ export function normalizeReconciliation(raw) {
       ml_confidence,
       alert,
       explanation,
-    } = raw
 
-    // Required identity + string fields.
-    if (typeof reconciliation_id !== "string" || reconciliation_id === "")
-      return null
-    if (typeof sensor_id !== "string" || sensor_id === "") return null
-    if (typeof timestamp !== "string" || timestamp === "") return null
+      /*
+       * Keep useful backend metadata without forcing the
+       * existing UI components to understand the backend model.
+       */
+      conflicting_sources: Array.isArray(raw.conflictingSources)
+        ? raw.conflictingSources
+        : [],
 
-    // source_values: object (may be a JSON string in audit records — handled
-    // separately by parseAuditSourceValues). Here we expect an object.
-    let sv = source_values
-    if (typeof sv === "string") {
-      sv = safeParseJSON(sv)
-    }
-    if (!sv || typeof sv !== "object") return null
+      requires_human_review: Boolean(
+        raw.requiresHumanReview,
+      ),
 
-    const normalizedSources = {}
-    for (const key of SOURCE_KEYS) {
-      normalizedSources[key] = normalizeSourceValue(sv[key])
-    }
-
-    // trusted_value must be a finite number per contract.
-    const trusted = normalizeSourceValue(trusted_value)
-
-    // ml_label must be one of the two known labels.
-    const label =
-      ml_label === "consistent" || ml_label === "conflicting"
-        ? ml_label
-        : null
-    if (label === null) return null
-
-    // ml_confidence: number 0..1. Clamp defensively.
-    let confidence = normalizeSourceValue(ml_confidence)
-    if (confidence === null) return null
-    confidence = Math.min(1, Math.max(0, confidence))
-
-    return {
-      reconciliation_id,
-      sensor_id,
-      timestamp,
-      source_values: normalizedSources,
-      trusted_value: trusted, // may be null if backend omitted; UI shows "—"
-      ml_label: label,
-      ml_confidence: confidence,
-      alert: Boolean(alert),
-      explanation:
-        typeof explanation === "string" ? explanation : "",
-      // parsed for convenience
       _ts: Date.parse(timestamp) || Date.now(),
     }
   } catch {
@@ -103,64 +266,74 @@ export function normalizeReconciliation(raw) {
   }
 }
 
-/** Safe JSON.parse that returns null instead of throwing. */
-export function safeParseJSON(str) {
+/**
+ * Normalize a collection of backend reconciliation records.
+ */
+export function normalizeReconciliations(raw) {
+  if (!Array.isArray(raw)) return []
+
+  return raw
+    .map(normalizeReconciliation)
+    .filter(Boolean)
+}
+
+/**
+ * Safe JSON.parse.
+ */
+export function safeParseJSON(value) {
   try {
-    return JSON.parse(str)
+    return JSON.parse(value)
   } catch {
     return null
   }
 }
 
 /**
- * Audit records carry source_values as a JSON STRING. Parse defensively and
- * normalize to the same shape as live events.
+ * Normalize an audit record.
+ *
+ * Audit data can use the same backend naming convention
+ * as reconciliation records, so it goes through the
+ * same adapter.
+ */
+export function normalizeAuditRecord(raw) {
+  return normalizeReconciliation(raw)
+}
+
+/**
+ * Parse source values from audit records.
  */
 export function parseAuditSourceValues(sourceValuesField) {
-  let obj = sourceValuesField
-  if (typeof obj === "string") obj = safeParseJSON(obj)
-  const out = {}
-  for (const key of SOURCE_KEYS) {
-    out[key] = obj && typeof obj === "object" ? normalizeSourceValue(obj[key]) : null
+  return normalizeSourceValues(
+    parseJSON(sourceValuesField),
+  )
+}
+
+/**
+ * Format numeric reading.
+ */
+export function fmtValue(value, digits = 2) {
+  if (
+    value === null ||
+    value === undefined ||
+    Number.isNaN(value)
+  ) {
+    return "—"
   }
-  return out
+
+  return Number(value).toFixed(digits)
 }
 
-/** Normalize a full audit record for display. Returns null if unusable. */
-export function normalizeAuditRecord(raw) {
-  if (!raw || typeof raw !== "object") return null
-  if (typeof raw.reconciliation_id !== "string") return null
-  return {
-    reconciliation_id: raw.reconciliation_id,
-    sensor_id: typeof raw.sensor_id === "string" ? raw.sensor_id : "—",
-    timestamp: typeof raw.timestamp === "string" ? raw.timestamp : "",
-    source_values: parseAuditSourceValues(raw.source_values),
-    trusted_value: normalizeSourceValue(raw.trusted_value),
-    ml_label:
-      raw.ml_label === "consistent" || raw.ml_label === "conflicting"
-        ? raw.ml_label
-        : "—",
-    ml_confidence: (() => {
-      const c = normalizeSourceValue(raw.ml_confidence)
-      return c === null ? null : Math.min(1, Math.max(0, c))
-    })(),
-    alert: Boolean(raw.alert),
-    explanation: typeof raw.explanation === "string" ? raw.explanation : "",
-  }
-}
-
-/** Format a numeric reading; null → em dash. */
-export function fmtValue(v, digits = 2) {
-  if (v === null || v === undefined || Number.isNaN(v)) return "—"
-  return Number(v).toFixed(digits)
-}
-
-/** Format ISO timestamp to HH:MM:SS (local). Falls back gracefully. */
+/**
+ * Format ISO timestamp to HH:MM:SS.
+ */
 export function fmtTime(iso) {
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return "—"
-  const d = new Date(t)
-  return d.toLocaleTimeString([], {
+  const timestamp = Date.parse(iso)
+
+  if (Number.isNaN(timestamp)) {
+    return "—"
+  }
+
+  return new Date(timestamp).toLocaleTimeString([], {
     hour: "2-digit",
     minute: "2-digit",
     second: "2-digit",
@@ -168,12 +341,17 @@ export function fmtTime(iso) {
   })
 }
 
-/** Format ISO timestamp to a fuller date-time for audit rows. */
+/**
+ * Format ISO timestamp for audit rows.
+ */
 export function fmtDateTime(iso) {
-  const t = Date.parse(iso)
-  if (Number.isNaN(t)) return "—"
-  const d = new Date(t)
-  return d.toLocaleString([], {
+  const timestamp = Date.parse(iso)
+
+  if (Number.isNaN(timestamp)) {
+    return "—"
+  }
+
+  return new Date(timestamp).toLocaleString([], {
     month: "short",
     day: "2-digit",
     hour: "2-digit",
@@ -183,7 +361,17 @@ export function fmtDateTime(iso) {
   })
 }
 
-export function fmtConfidence(c) {
-  if (c === null || c === undefined || Number.isNaN(c)) return "—"
-  return `${Math.round(c * 100)}%`
+/**
+ * Format confidence value.
+ */
+export function fmtConfidence(confidence) {
+  if (
+    confidence === null ||
+    confidence === undefined ||
+    Number.isNaN(confidence)
+  ) {
+    return "—"
+  }
+
+  return `${Math.round(confidence * 100)}%`
 }

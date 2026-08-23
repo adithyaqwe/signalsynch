@@ -1,23 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from "react"
-import { STREAM_URL, USE_MOCK_DATA } from "../lib/api.js"
+import { io } from "socket.io-client"
+import { SOCKET_URL, USE_MOCK_DATA } from "../lib/api.js"
 import { normalizeReconciliation } from "../lib/validation.js"
-
-/**
- * Primary real-time channel: Server-Sent Events from GET /stream.
- *
- * Responsibilities:
- *  - Open an EventSource and listen for `reconciliation` events (and default
- *    `message` events, since some backends omit the event name).
- *  - Validate/normalize each payload; ignore malformed events without crashing.
- *  - Track connection state machine:
- *      CONNECTING | CONNECTED | ERROR | RECONNECTING | FALLBACK_POLLING
- *  - Controlled reconnect with capped exponential backoff (no rapid loops).
- *  - After repeated failures, signal fallback so the caller starts polling.
- *  - Clean up EventSource + timers on unmount.
- *
- * This hook does NOT manage polling itself; it reports connection state and
- * hands validated events to `onEvent`. The caller (App) owns dedup + history.
- */
 
 export const SSE_STATE = {
   CONNECTING: "CONNECTING",
@@ -27,147 +11,184 @@ export const SSE_STATE = {
   FALLBACK_POLLING: "FALLBACK_POLLING",
 }
 
-const MAX_SSE_ATTEMPTS = 4 // after this many failed attempts → fallback
-const BASE_BACKOFF_MS = 1000
-const MAX_BACKOFF_MS = 8000
-
+/**
+ * Realtime connection hook.
+ *
+ * The hook keeps the existing useSSE interface used by App.jsx,
+ * but the real transport is now Socket.IO because that is what
+ * the current backend exposes.
+ *
+ * Backend realtime event:
+ *   reconciliation-result
+ *
+ * The backend emits the complete reconciliation record after
+ * ML analysis and reconciliation.
+ */
 export function useSSE({ enabled = true, onEvent } = {}) {
   const [state, setState] = useState(
     USE_MOCK_DATA ? SSE_STATE.CONNECTED : SSE_STATE.CONNECTING,
   )
-  const esRef = useRef(null)
-  const attemptsRef = useRef(0)
-  const reconnectTimerRef = useRef(null)
+
+  const socketRef = useRef(null)
   const onEventRef = useRef(onEvent)
   const mountedRef = useRef(true)
+  const retryTimerRef = useRef(null)
   const mockTimerRef = useRef(null)
 
-  // Keep latest callback without re-subscribing the stream.
   useEffect(() => {
     onEventRef.current = onEvent
   }, [onEvent])
 
   const cleanup = useCallback(() => {
-    if (esRef.current) {
-      esRef.current.close()
-      esRef.current = null
+    if (socketRef.current) {
+      socketRef.current.removeAllListeners()
+      socketRef.current.disconnect()
+      socketRef.current = null
     }
-    if (reconnectTimerRef.current) {
-      clearTimeout(reconnectTimerRef.current)
-      reconnectTimerRef.current = null
+
+    if (retryTimerRef.current) {
+      clearTimeout(retryTimerRef.current)
+      retryTimerRef.current = null
     }
   }, [])
 
-  const handleRaw = useCallback((rawData) => {
-    let parsed
-    try {
-      parsed = typeof rawData === "string" ? JSON.parse(rawData) : rawData
-    } catch {
-      console.warn("[SignalSynch] Ignored SSE event: invalid JSON")
+  const handleReconciliation = useCallback((raw) => {
+    const normalized = normalizeReconciliation(raw)
+
+    if (!normalized) {
+      console.warn(
+        "[SignalSynch] Ignored malformed reconciliation-result event",
+      )
       return
     }
-    const norm = normalizeReconciliation(parsed)
-    if (!norm) {
-      console.warn("[SignalSynch] Ignored malformed reconciliation event")
-      return
-    }
-    onEventRef.current && onEventRef.current(norm)
+
+    onEventRef.current?.(normalized)
   }, [])
 
   const connect = useCallback(() => {
-    if (!enabled) return
-    if (typeof window === "undefined" || typeof EventSource === "undefined") {
-      // Environment without EventSource → go straight to fallback.
-      setState(SSE_STATE.FALLBACK_POLLING)
-      return
-    }
+    if (!enabled || USE_MOCK_DATA) return
 
     cleanup()
+
     setState(
-      attemptsRef.current === 0 ? SSE_STATE.CONNECTING : SSE_STATE.RECONNECTING,
+      state === SSE_STATE.CONNECTED
+        ? SSE_STATE.RECONNECTING
+        : SSE_STATE.CONNECTING,
     )
 
-    let es
-    try {
-      es = new EventSource(STREAM_URL())
-    } catch {
-      scheduleReconnect()
-      return
-    }
-    esRef.current = es
+    const socket = io(SOCKET_URL, {
+      transports: ["websocket", "polling"],
+      reconnection: false,
+      timeout: 8000,
+    })
 
-    es.onopen = () => {
+    socketRef.current = socket
+
+    socket.on("connect", () => {
       if (!mountedRef.current) return
-      attemptsRef.current = 0
+
       setState(SSE_STATE.CONNECTED)
-    }
 
-    // Named contract event.
-    es.addEventListener("reconciliation", (e) => handleRaw(e.data))
-    // Fallback: some servers send unnamed `message` events.
-    es.onmessage = (e) => handleRaw(e.data)
+      console.info(
+        `[SignalSynch] Socket.IO connected: ${socket.id}`,
+      )
+    })
 
-    es.onerror = () => {
+    socket.on("reconciliation-result", handleReconciliation)
+
+    socket.on("connect_error", (error) => {
       if (!mountedRef.current) return
-      // EventSource auto-retries, but we take explicit control for backoff
-      // and eventual fallback to polling.
-      cleanup()
-      scheduleReconnect()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [enabled, cleanup, handleRaw])
 
-  const scheduleReconnect = useCallback(() => {
-    attemptsRef.current += 1
-    if (attemptsRef.current > MAX_SSE_ATTEMPTS) {
-      setState(SSE_STATE.FALLBACK_POLLING)
-      return
-    }
-    setState(SSE_STATE.ERROR)
-    const backoff = Math.min(
-      MAX_BACKOFF_MS,
-      BASE_BACKOFF_MS * 2 ** (attemptsRef.current - 1),
-    )
-    reconnectTimerRef.current = setTimeout(() => {
-      if (mountedRef.current) connect()
-    }, backoff)
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [connect])
+      console.warn(
+        "[SignalSynch] Socket.IO connection failed:",
+        error?.message || error,
+      )
 
-  // Allow the caller to force a fresh SSE attempt (e.g. periodic retry while
-  // in polling fallback).
+      setState(SSE_STATE.ERROR)
+
+      if (retryTimerRef.current) {
+        clearTimeout(retryTimerRef.current)
+      }
+
+      retryTimerRef.current = setTimeout(() => {
+        if (mountedRef.current && enabled) {
+          connect()
+        }
+      }, 5000)
+    })
+
+    socket.on("disconnect", (reason) => {
+      if (!mountedRef.current) return
+
+      console.warn(
+        `[SignalSynch] Socket.IO disconnected: ${reason}`,
+      )
+
+      setState(SSE_STATE.RECONNECTING)
+
+      if (!retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null
+
+          if (mountedRef.current && enabled) {
+            connect()
+          }
+        }, 5000)
+      }
+    })
+  }, [enabled, cleanup, handleReconciliation, state])
+
   const retry = useCallback(() => {
-    attemptsRef.current = 0
+    cleanup()
+    setState(SSE_STATE.CONNECTING)
     connect()
-  }, [connect])
+  }, [cleanup, connect])
 
   useEffect(() => {
     mountedRef.current = true
 
-    // Mock mode: synthesize a connected stream on an interval.
     if (USE_MOCK_DATA) {
       setState(SSE_STATE.CONNECTED)
-      let mod
-      import("../data/mockData.js").then((m) => {
-        mod = m
+
+      import("../data/mockData.js").then((mod) => {
+        if (!mountedRef.current) return
+
         mockTimerRef.current = setInterval(() => {
           if (!mountedRef.current) return
-          const ev = mod.generateMockEvent({ mode: "auto" })
-          handleRaw(ev)
+
+          const event = mod.generateMockEvent({
+            mode: "auto",
+          })
+
+          handleReconciliation(event)
         }, 900)
       })
+
       return () => {
         mountedRef.current = false
-        if (mockTimerRef.current) clearInterval(mockTimerRef.current)
+
+        if (mockTimerRef.current) {
+          clearInterval(mockTimerRef.current)
+          mockTimerRef.current = null
+        }
+
+        cleanup()
       }
     }
 
-    if (enabled) connect()
+    if (enabled) {
+      connect()
+    }
+
     return () => {
       mountedRef.current = false
       cleanup()
     }
-  }, [enabled, connect, cleanup, handleRaw])
+  }, [enabled, connect, cleanup, handleReconciliation])
 
-  return { state, retry, setState }
+  return {
+    state,
+    retry,
+    setState,
+  }
 }
