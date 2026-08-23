@@ -59,6 +59,6 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    # Run on PORT env var if available, else 8000
-    port = int(os.environ.get('PORT', 8000))
+    # Run ML Service on port 8000 (do not collide with Node PORT)
+    port = int(os.environ.get('ML_PORT', 8000))
     app.run(host='0.0.0.0', port=port)

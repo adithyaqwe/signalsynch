@@ -17,7 +17,15 @@ const app = express();
 app.use(cors());
 app.use(express.json());
 
-// Health Check
+// Root & Health Check
+app.get('/', (req, res) => {
+  res.status(200).json({
+    status: 'ok',
+    service: 'SignalSynch Real-Time Backend API',
+    version: '1.0.0'
+  });
+});
+
 app.get('/api/health', (req, res) => {
   res.status(200).json({
     success: true,
