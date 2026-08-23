@@ -1,0 +1,247 @@
+{
+  "info": {
+    "name": "SignalSynch MVP",
+    "description": "Complete collection to test all endpoints for the SignalSynch backend.",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "variable": [
+    {
+      "key": "base_url",
+      "value": "http://localhost:5000/api",
+      "type": "string"
+    }
+  ],
+  "item": [
+    {
+      "name": "Server",
+      "item": [
+        {
+          "name": "Health Check",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/health",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "health"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Events",
+      "item": [
+        {
+          "name": "Ingest Consistent Event Group",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"eventId\": \"EVT-CONSISTENT-100\",\n    \"source\": \"SOURCE_A\",\n    \"value\": 72.4,\n    \"timestamp\": \"2026-08-23T10:30:00Z\"\n  },\n  {\n    \"eventId\": \"EVT-CONSISTENT-100\",\n    \"source\": \"SOURCE_B\",\n    \"value\": 72.5,\n    \"timestamp\": \"2026-08-23T10:30:01Z\"\n  },\n  {\n    \"eventId\": \"EVT-CONSISTENT-100\",\n    \"source\": \"SOURCE_C\",\n    \"value\": 72.6,\n    \"timestamp\": \"2026-08-23T10:30:02Z\"\n  }\n]"
+            },
+            "url": {
+              "raw": "{{base_url}}/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Ingest Conflicting Event Group (Format A, B, C)",
+          "request": {
+            "method": "POST",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "body": {
+              "mode": "raw",
+              "raw": "[\n  {\n    \"eventId\": \"EVT-CONFLICT-101\",\n    \"source\": \"SOURCE_A\",\n    \"value\": 72.4,\n    \"timestamp\": \"2026-08-23T10:30:00Z\"\n  },\n  {\n    \"event_id\": \"EVT-CONFLICT-101\",\n    \"source_id\": \"SOURCE_B\",\n    \"reading\": 72.5,\n    \"time\": \"2026-08-23T10:30:01Z\"\n  },\n  {\n    \"id\": \"EVT-CONFLICT-101\",\n    \"source\": \"SOURCE_C\",\n    \"eventValue\": 91.8,\n    \"timestamp\": \"2026-08-23T10:30:02Z\"\n  }\n]"
+            },
+            "url": {
+              "raw": "{{base_url}}/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get All Events",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/events",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "events"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Event Group",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/events/EVT-CONFLICT-101",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "events",
+                "EVT-CONFLICT-101"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Reconciliation",
+      "item": [
+        {
+          "name": "Get All Reconciliations",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/reconciliation",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reconciliation"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Get Reconciliation by Event ID",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/reconciliation/EVT-CONFLICT-101",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reconciliation",
+                "EVT-CONFLICT-101"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Manually Trigger Reconciliation",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/reconciliation/reconcile/EVT-CONFLICT-101",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "reconciliation",
+                "reconcile",
+                "EVT-CONFLICT-101"
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Alerts",
+      "item": [
+        {
+          "name": "Get All Alerts",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/alerts",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "alerts"
+              ]
+            }
+          }
+        },
+        {
+          "name": "Resolve Alert",
+          "request": {
+            "method": "POST",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/alerts/:alertId/resolve",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "alerts",
+                ":alertId",
+                "resolve"
+              ],
+              "variable": [
+                {
+                  "key": "alertId",
+                  "value": "<PUT_ALERT_ID_HERE>"
+                }
+              ]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "Audit Logs",
+      "item": [
+        {
+          "name": "Get All Audit Logs",
+          "request": {
+            "method": "GET",
+            "header": [],
+            "url": {
+              "raw": "{{base_url}}/audit-logs",
+              "host": [
+                "{{base_url}}"
+              ],
+              "path": [
+                "audit-logs"
+              ]
+            }
+          }
+        }
+      ]
+    }
+  ]
+}
