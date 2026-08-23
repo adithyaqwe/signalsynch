@@ -112,28 +112,39 @@ export default function App() {
           </div>
         </div>
 
-        {/* ── Sensor Tabs ── */}
-        <div className="flex flex-wrap gap-2">
-          {SENSORS.map((id) => {
-            const active = id === selectedSensor;
-            const hasAlert = latestEvents[id]?.alert;
-            return (
-              <button
-                key={id}
-                onClick={() => setSelectedSensor(id)}
-                className={`btn-neo text-sm ${
-                  active
-                    ? 'bg-neo-yellow'
-                    : hasAlert
-                    ? 'bg-neo-red text-white'
-                    : 'bg-white hover:bg-gray-100'
-                }`}
-              >
-                {hasAlert && !active && <span className="mr-1">⚠</span>}
-                {SENSOR_BASELINES[id]?.label || id}
-              </button>
-            );
-          })}
+        {/* ── Sensor Tabs & Anomaly Trigger ── */}
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div className="flex flex-wrap gap-2">
+            {SENSORS.map((id) => {
+              const active = id === selectedSensor;
+              const hasAlert = latestEvents[id]?.alert;
+              return (
+                <button
+                  key={id}
+                  onClick={() => setSelectedSensor(id)}
+                  className={`btn-neo text-sm ${
+                    active
+                      ? 'bg-neo-yellow'
+                      : hasAlert
+                      ? 'bg-neo-red text-white'
+                      : 'bg-white hover:bg-gray-100'
+                  }`}
+                >
+                  {hasAlert && !active && <span className="mr-1">⚠</span>}
+                  {SENSOR_BASELINES[id]?.label || id}
+                </button>
+              );
+            })}
+          </div>
+
+          <button
+            onClick={handleForceAnomaly}
+            disabled={isInjecting}
+            className="btn-neo text-xs px-3.5 py-2 uppercase font-black tracking-wider bg-purple-400 text-black hover:bg-purple-300 active:translate-x-[1px] active:translate-y-[1px] cursor-pointer"
+            style={{ backgroundColor: '#c084fc', border: '3px solid black', boxShadow: '3px 3px 0px 0px rgba(0,0,0,1)' }}
+          >
+            {isInjecting ? '🚨 INJECTING CONFLICT...' : '⚡ INJECT CONFLICT (DEMO)'}
+          </button>
         </div>
 
         {/* ── Main Panels ── */}
