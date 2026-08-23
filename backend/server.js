@@ -15,6 +15,13 @@ initSocket(server);
 connectDB().then(() => {
   server.listen(PORT, () => {
     console.log(`[Server] SignalSynch backend running on port ${PORT}`);
+    // Automatically stream telemetry 24/7 in cloud
+    try {
+      const { startSimulator } = require('./simulator');
+      startSimulator(PORT);
+    } catch(e) {
+      console.log('[Simulator] Auto-start error:', e.message);
+    }
   });
 }).catch(err => {
   console.error(`[Server] Failed to start server: ${err.message}`);
