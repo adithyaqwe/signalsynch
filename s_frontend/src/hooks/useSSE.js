@@ -29,12 +29,11 @@ export default function useSSE() {
 
   // Process a single reconciliation event into state
   const processEvent = useCallback((event) => {
+    if (!event || !event.sensor_id) return;
     const { sensor_id } = event;
 
     setEvents((prev) => {
       const history = prev[sensor_id] || [];
-      // Deduplicate
-      if (history.find((e) => e.reconciliation_id === event.reconciliation_id)) return prev;
       const updated = [...history, event].slice(-MAX_HISTORY_PER_SENSOR);
       return { ...prev, [sensor_id]: updated };
     });
@@ -42,10 +41,7 @@ export default function useSSE() {
     setLatestEvents((prev) => ({ ...prev, [sensor_id]: event }));
 
     if (event.alert) {
-      setAlerts((prev) => {
-        if (prev.find((a) => a.reconciliation_id === event.reconciliation_id)) return prev;
-        return [event, ...prev].slice(0, 50);
-      });
+      setAlerts((prev) => [event, ...prev.slice(0, 49)]);
     }
   }, []);
 
@@ -160,28 +156,31 @@ export default function useSSE() {
       // Listen for reconciliation results
       socket.on('reconciliation-result', (data) => {
         try {
+          if (!data) return;
           // Map Node backend structure to Frontend structure
           const sensor_id = data.eventId && data.eventId.startsWith('sensor_')
             ? data.eventId.split('_').slice(0, 2).join('_')
             : (data.sensorId || data.eventId || 'sensor_001');
 
-          const isConflicting = data.mlResult?.status === 'conflicting' || data.status === 'CONFLICT_DETECTED' || data.status === 'AUTO_RESOLVED';
+          const isConflicting = data.mlResult?.status === 'conflicting' || data.status === 'CONFLICT_DETECTED' || data.status === 'AUTO_RESOLVED' || (data.conflictingSources && data.conflictingSources.length > 0);
+          
           const translated = {
-            reconciliation_id: `${data.eventId}_${data.updatedAt || Date.now()}`,
+            reconciliation_id: `${data.eventId}_${Date.now()}_${Math.random().toString(36).substr(2, 4)}`,
             sensor_id: sensor_id,
             timestamp: data.updatedAt || new Date().toISOString(),
             source_values: {},
             trusted_value: data.trustedValue,
             ml_label: isConflicting ? 'conflicting' : 'consistent',
-            ml_confidence: data.confidence || (data.mlResult ? data.mlResult.confidence : 0.95),
+            ml_confidence: data.confidence !== undefined ? data.confidence : (data.mlResult ? data.mlResult.confidence : 0.95),
             alert: Boolean(data.requiresHumanReview || isConflicting),
-            explanation: data.reason,
+            explanation: data.reason || (isConflicting ? 'Outlier detected among sources.' : 'All sources in consensus.'),
+            conflictingSources: data.conflictingSources || [],
           };
           
           if (data.sourceValues) {
             data.sourceValues.forEach((sv) => {
               const src = sv.source.replace('SOURCE_', '');
-              translated.source_values[src] = sv.value;
+              translated.source_values[src] = Number(sv.value);
             });
           }
 

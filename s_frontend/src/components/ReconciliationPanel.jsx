@@ -39,7 +39,12 @@ export default function ReconciliationPanel({ event, sensorId }) {
         <div className="grid grid-cols-3 gap-2">
           {['A', 'B', 'C'].map((src) => {
             const val = event.source_values?.[src];
-            const isOutlier = isConflicting && event.explanation?.includes(`Source ${src}`);
+            const isOutlier = isConflicting && (
+              event.conflictingSources?.includes(src) ||
+              event.conflictingSources?.includes(`SOURCE_${src}`) ||
+              event.explanation?.includes(`Source ${src}`) ||
+              event.explanation?.includes(`SOURCE_${src}`)
+            );
             return (
               <div
                 key={src}
