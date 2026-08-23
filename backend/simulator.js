@@ -6,7 +6,8 @@
 
 const axios = require('axios');
 
-const API_ENDPOINT = process.env.API_ENDPOINT || 'http://localhost:5000/api/events';
+const PORT = process.env.PORT || 5000;
+const API_ENDPOINT = process.env.API_ENDPOINT || `http://127.0.0.1:${PORT}/api/events`;
 const INTERVAL_MS = parseInt(process.env.INTERVAL_MS, 10) || 1200;
 
 const SENSOR_BASELINES = {

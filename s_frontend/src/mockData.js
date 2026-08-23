@@ -13,7 +13,7 @@ export const USE_MOCK = (typeof import.meta !== 'undefined' && import.meta.env &
 
 export const BACKEND_URL = (typeof import.meta !== 'undefined' && import.meta.env && import.meta.env.VITE_BACKEND_URL)
   ? String(import.meta.env.VITE_BACKEND_URL).replace(/\/+$/, '')
-  : 'http://localhost:5000';
+  : 'https://signalsynch-x7r4.onrender.com';
 export const SSE_URL = `${BACKEND_URL}/stream`;
 export const POLL_URL = `${BACKEND_URL}/api/reconciliation`;
 export const AUDIT_URL = `${BACKEND_URL}/api/reconciliation`;
