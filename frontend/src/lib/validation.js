@@ -11,9 +11,9 @@
  * timestamp            → timestamp
  * sourceValues[]       → source_values { A, B, C }
  * trustedValue         → trusted_value
- * status               → ml_label
+ * status / decision    → ml_label
  * confidence           → ml_confidence
- * requiresHumanReview  → alert
+ * requiresHumanReview  → alert / requires_human_review
  * reason               → explanation
  */
 
@@ -27,11 +27,11 @@ export const KNOWN_SENSORS = [
   "sensor_005",
 ]
 
-function isFiniteNumber(value) {
+export function isFiniteNumber(value) {
   return typeof value === "number" && Number.isFinite(value)
 }
 
-function normalizeNumber(value) {
+export function normalizeNumber(value) {
   if (value === null || value === undefined || value === "") {
     return null
   }
@@ -51,26 +51,32 @@ function normalizeNumber(value) {
   return null
 }
 
-function normalizeLabel(status) {
-  if (typeof status !== "string") return null
+export function normalizeLabel(raw) {
+  if (typeof raw !== "string") return null
 
-  const normalized = status.toLowerCase().trim()
+  const normalized = raw.toLowerCase().trim()
 
   if (
     normalized === "consistent" ||
-    normalized === "conflicting"
+    normalized === "event_analyzed"
   ) {
-    return normalized
+    return "consistent"
   }
 
-  if (normalized === "auto_resolved" || normalized === "conflict_detected" || normalized === "human_review_required") {
+  if (
+    normalized === "conflicting" ||
+    normalized === "auto_resolved" ||
+    normalized === "conflict_detected" ||
+    normalized === "human_review_required" ||
+    normalized === "conflict"
+  ) {
     return "conflicting"
   }
 
   return null
 }
 
-function sourceNameToKey(source) {
+export function sourceNameToKey(source) {
   if (typeof source !== "string") return null
 
   const normalized = source
@@ -92,24 +98,40 @@ function sourceNameToKey(source) {
   return null
 }
 
-function normalizeSourceValues(raw) {
+export function parseJSON(value) {
+  if (typeof value !== "string") return value
+
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+export function safeParseJSON(value) {
+  try {
+    return JSON.parse(value)
+  } catch {
+    return null
+  }
+}
+
+export function normalizeSourceValues(raw) {
   const result = {
     A: null,
     B: null,
     C: null,
   }
 
-  /*
-   * Backend shape:
-   *
-   * [
-   *   { source: "SOURCE_A", value: 10 },
-   *   { source: "SOURCE_B", value: 10 },
-   *   { source: "SOURCE_C", value: 10 }
-   * ]
-   */
-  if (Array.isArray(raw)) {
-    for (const item of raw) {
+  if (!raw) return result
+
+  let parsed = raw
+  if (typeof raw === "string") {
+    parsed = parseJSON(raw)
+  }
+
+  if (Array.isArray(parsed)) {
+    for (const item of parsed) {
       if (!item || typeof item !== "object") continue
 
       const key = sourceNameToKey(item.source)
@@ -122,28 +144,22 @@ function normalizeSourceValues(raw) {
     return result
   }
 
-  /*
-   * Also support the frontend/mock shape:
-   *
-   * { A: 10, B: 10, C: 10 }
-   */
-  if (raw && typeof raw === "object") {
+  if (parsed && typeof parsed === "object") {
     for (const key of SOURCE_KEYS) {
-      result[key] = normalizeNumber(raw[key])
+      result[key] = normalizeNumber(parsed[key])
     }
   }
 
   return result
 }
 
-function parseJSON(value) {
-  if (typeof value !== "string") return value
-
-  try {
-    return JSON.parse(value)
-  } catch {
-    return null
-  }
+/**
+ * Parse source values from audit records.
+ */
+export function parseAuditSourceValues(sourceValuesField) {
+  return normalizeSourceValues(
+    parseJSON(sourceValuesField),
+  )
 }
 
 /**
@@ -156,24 +172,28 @@ export function normalizeReconciliation(raw) {
       return null
     }
 
-    /*
-     * Accept both the current backend naming and the
-     * existing frontend/mock naming.
-     */
     const reconciliation_id =
-      raw.eventId ??
       raw.reconciliation_id ??
-      raw.id
+      raw.eventId ??
+      raw.id ??
+      (raw._id != null ? String(raw._id) : null)
 
     const sensor_id =
-      raw.sensorId ??
       raw.sensor_id ??
+      raw.sensorId ??
       "—"
 
-    const timestamp =
+    const rawTs =
       raw.timestamp ??
       raw.createdAt ??
-      raw.created_at
+      raw.created_at ??
+      raw.updatedAt
+
+    const tsDate = rawTs ? new Date(rawTs) : new Date()
+    const timestamp = !isNaN(tsDate.getTime())
+      ? tsDate.toISOString()
+      : new Date().toISOString()
+    const _ts = !isNaN(tsDate.getTime()) ? tsDate.getTime() : Date.now()
 
     if (
       typeof reconciliation_id !== "string" ||
@@ -182,63 +202,69 @@ export function normalizeReconciliation(raw) {
       return null
     }
 
-    if (
-      typeof timestamp !== "string" ||
-      timestamp.trim() === ""
-    ) {
-      return null
-    }
-
     const source_values = normalizeSourceValues(
-      parseJSON(raw.sourceValues ?? raw.source_values),
+      raw.source_values ?? raw.sourceValues,
     )
 
     const trusted_value = normalizeNumber(
-      raw.trustedValue ??
-      raw.trusted_value,
+      raw.trusted_value ??
+      raw.trustedValue,
     )
+
+    const mlResult =
+      raw.mlResult && typeof raw.mlResult === "object"
+        ? raw.mlResult
+        : {}
 
     const ml_label =
       normalizeLabel(raw.status) ??
-      normalizeLabel(raw.ml_label)
-
-    /*
-     * A reconciliation result needs a valid classification.
-     * If the backend is temporarily missing it, ignore the
-     * record rather than displaying misleading information.
-     */
-    if (!ml_label) {
-      return null
-    }
+      normalizeLabel(raw.ml_label) ??
+      normalizeLabel(raw.decision) ??
+      normalizeLabel(mlResult.status) ??
+      normalizeLabel(raw.action) ??
+      "consistent"
 
     let ml_confidence = normalizeNumber(
       raw.confidence ??
-      raw.ml_confidence,
+      raw.ml_confidence ??
+      mlResult.confidence,
     )
 
-    if (ml_confidence === null) {
-      return null
+    if (ml_confidence !== null) {
+      if (ml_confidence > 1 && ml_confidence <= 100) {
+        ml_confidence = ml_confidence / 100
+      }
+      ml_confidence = Math.min(1, Math.max(0, ml_confidence))
     }
 
-    /*
-     * Backend confidence should be 0..1.
-     */
-    ml_confidence = Math.min(
-      1,
-      Math.max(0, ml_confidence),
+    const requires_human_review = Boolean(
+      raw.requires_human_review ??
+      raw.requiresHumanReview ??
+      (raw.status === "HUMAN_REVIEW_REQUIRED" || raw.decision === "HUMAN_REVIEW_REQUIRED"),
     )
 
     const alert =
-      Boolean(raw.requiresHumanReview) ||
-      Boolean(raw.alert) ||
-      ml_label === "conflicting"
+      typeof raw.alert === "boolean"
+        ? raw.alert
+        : requires_human_review ||
+          raw.status === "CONFLICT_DETECTED" ||
+          raw.decision === "CONFLICT_DETECTED" ||
+          ml_label === "conflicting"
 
     const explanation =
-      typeof raw.reason === "string"
-        ? raw.reason
-        : typeof raw.explanation === "string"
-          ? raw.explanation
+      typeof raw.explanation === "string"
+        ? raw.explanation
+        : typeof raw.reason === "string"
+          ? raw.reason
           : ""
+
+    const conflicting_sources = Array.isArray(raw.conflicting_sources)
+      ? raw.conflicting_sources
+      : Array.isArray(raw.conflictingSources)
+        ? raw.conflictingSources
+        : Array.isArray(mlResult.conflictingSources)
+          ? mlResult.conflictingSources
+          : []
 
     return {
       reconciliation_id,
@@ -250,20 +276,9 @@ export function normalizeReconciliation(raw) {
       ml_confidence,
       alert,
       explanation,
-
-      /*
-       * Keep useful backend metadata without forcing the
-       * existing UI components to understand the backend model.
-       */
-      conflicting_sources: Array.isArray(raw.conflictingSources)
-        ? raw.conflictingSources
-        : [],
-
-      requires_human_review: Boolean(
-        raw.requiresHumanReview,
-      ),
-
-      _ts: Date.parse(timestamp) || Date.now(),
+      conflicting_sources,
+      requires_human_review,
+      _ts,
     }
   } catch {
     return null
@@ -282,40 +297,140 @@ export function normalizeReconciliations(raw) {
 }
 
 /**
- * Safe JSON.parse.
+ * Dedicated normalizer for backend AuditLog records.
+ *
+ * Backend AuditLog schema:
+ * - eventId
+ * - action
+ * - decision
+ * - trustedValue
+ * - reason
+ * - mlResult { status, confidence, conflictingSources }
+ * - timestamp
  */
-export function safeParseJSON(value) {
+export function normalizeAuditRecord(raw) {
   try {
-    return JSON.parse(value)
+    if (!raw || typeof raw !== "object") {
+      return null
+    }
+
+    const reconciliation_id =
+      raw.reconciliation_id ??
+      raw.eventId ??
+      raw.id ??
+      (raw._id != null ? String(raw._id) : null)
+
+    if (
+      typeof reconciliation_id !== "string" ||
+      reconciliation_id.trim() === ""
+    ) {
+      return null
+    }
+
+    const sensor_id =
+      raw.sensor_id ??
+      raw.sensorId ??
+      "—"
+
+    const rawTs =
+      raw.timestamp ??
+      raw.createdAt ??
+      raw.created_at ??
+      raw.updatedAt
+
+    const tsDate = rawTs ? new Date(rawTs) : new Date()
+    const timestamp = !isNaN(tsDate.getTime())
+      ? tsDate.toISOString()
+      : new Date().toISOString()
+    const _ts = !isNaN(tsDate.getTime()) ? tsDate.getTime() : Date.now()
+
+    const mlResult =
+      raw.mlResult && typeof raw.mlResult === "object"
+        ? raw.mlResult
+        : {}
+
+    const ml_label =
+      normalizeLabel(raw.decision) ??
+      normalizeLabel(raw.status) ??
+      normalizeLabel(raw.ml_label) ??
+      normalizeLabel(mlResult.status) ??
+      normalizeLabel(raw.action) ??
+      "consistent"
+
+    let ml_confidence = normalizeNumber(
+      mlResult.confidence ??
+      raw.ml_confidence ??
+      raw.confidence,
+    )
+
+    if (ml_confidence !== null) {
+      if (ml_confidence > 1 && ml_confidence <= 100) {
+        ml_confidence = ml_confidence / 100
+      }
+      ml_confidence = Math.min(1, Math.max(0, ml_confidence))
+    }
+
+    const source_values = normalizeSourceValues(
+      raw.source_values ?? raw.sourceValues,
+    )
+
+    const trusted_value = normalizeNumber(
+      raw.trusted_value ??
+      raw.trustedValue,
+    )
+
+    const requires_human_review = Boolean(
+      raw.requires_human_review ??
+      raw.requiresHumanReview ??
+      (raw.decision === "HUMAN_REVIEW_REQUIRED" || raw.status === "HUMAN_REVIEW_REQUIRED"),
+    )
+
+    const alert =
+      typeof raw.alert === "boolean"
+        ? raw.alert
+        : requires_human_review ||
+          raw.decision === "CONFLICT_DETECTED" ||
+          raw.status === "CONFLICT_DETECTED" ||
+          ml_label === "conflicting"
+
+    const explanation =
+      typeof raw.explanation === "string"
+        ? raw.explanation
+        : typeof raw.reason === "string"
+          ? raw.reason
+          : ""
+
+    const conflicting_sources = Array.isArray(raw.conflicting_sources)
+      ? raw.conflicting_sources
+      : Array.isArray(raw.conflictingSources)
+        ? raw.conflictingSources
+        : Array.isArray(mlResult.conflictingSources)
+          ? mlResult.conflictingSources
+          : []
+
+    return {
+      reconciliation_id,
+      sensor_id,
+      timestamp,
+      source_values,
+      trusted_value,
+      ml_label,
+      ml_confidence,
+      alert,
+      explanation,
+      conflicting_sources,
+      requires_human_review,
+      _ts,
+    }
   } catch {
     return null
   }
 }
 
 /**
- * Normalize an audit record.
- *
- * Audit data can use the same backend naming convention
- * as reconciliation records, so it goes through the
- * same adapter.
- */
-export function normalizeAuditRecord(raw) {
-  return normalizeReconciliation(raw)
-}
-
-/**
- * Parse source values from audit records.
- */
-export function parseAuditSourceValues(sourceValuesField) {
-  return normalizeSourceValues(
-    parseJSON(sourceValuesField),
-  )
-}
-
-/**
  * Format numeric reading.
  */
-export function fmtValue(value, digits = 2) {
+export function fmtValue(value, digits = 1) {
   if (
     value === null ||
     value === undefined ||
@@ -377,5 +492,6 @@ export function fmtConfidence(confidence) {
     return "—"
   }
 
-  return `${Math.round(confidence * 100)}%`
+  const pct = confidence <= 1 ? Math.round(confidence * 100) : Math.round(confidence)
+  return `${pct}%`
 }

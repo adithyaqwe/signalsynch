@@ -32,7 +32,6 @@ export function useSSE({ enabled = true, onEvent } = {}) {
   const socketRef = useRef(null)
   const onEventRef = useRef(onEvent)
   const mountedRef = useRef(true)
-  const retryTimerRef = useRef(null)
   const mockTimerRef = useRef(null)
 
   useEffect(() => {
@@ -44,11 +43,6 @@ export function useSSE({ enabled = true, onEvent } = {}) {
       socketRef.current.removeAllListeners()
       socketRef.current.disconnect()
       socketRef.current = null
-    }
-
-    if (retryTimerRef.current) {
-      clearTimeout(retryTimerRef.current)
-      retryTimerRef.current = null
     }
   }, [])
 
@@ -70,8 +64,8 @@ export function useSSE({ enabled = true, onEvent } = {}) {
 
     cleanup()
 
-    setState(
-      state === SSE_STATE.CONNECTED
+    setState((prev) =>
+      prev === SSE_STATE.CONNECTED
         ? SSE_STATE.RECONNECTING
         : SSE_STATE.CONNECTING,
     )
@@ -104,17 +98,7 @@ export function useSSE({ enabled = true, onEvent } = {}) {
         error?.message || error,
       )
 
-      setState(SSE_STATE.ERROR)
-
-      if (retryTimerRef.current) {
-        clearTimeout(retryTimerRef.current)
-      }
-
-      retryTimerRef.current = setTimeout(() => {
-        if (mountedRef.current && enabled) {
-          connect()
-        }
-      }, 5000)
+      setState(SSE_STATE.FALLBACK_POLLING)
     })
 
     socket.on("disconnect", (reason) => {
@@ -124,25 +108,13 @@ export function useSSE({ enabled = true, onEvent } = {}) {
         `[SignalSynch] Socket.IO disconnected: ${reason}`,
       )
 
-      setState(SSE_STATE.RECONNECTING)
-
-      if (!retryTimerRef.current) {
-        retryTimerRef.current = setTimeout(() => {
-          retryTimerRef.current = null
-
-          if (mountedRef.current && enabled) {
-            connect()
-          }
-        }, 5000)
-      }
+      setState(SSE_STATE.FALLBACK_POLLING)
     })
-  }, [enabled, cleanup, handleReconciliation, state])
+  }, [enabled, cleanup, handleReconciliation])
 
   const retry = useCallback(() => {
-    cleanup()
-    setState(SSE_STATE.CONNECTING)
     connect()
-  }, [cleanup, connect])
+  }, [connect])
 
   useEffect(() => {
     mountedRef.current = true

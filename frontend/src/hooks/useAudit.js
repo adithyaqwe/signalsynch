@@ -34,7 +34,7 @@ export function useAudit({ initialPage = 1, limit = 25 } = {}) {
           data = await fetchAudit(p, limit)
         }
         if (reqId !== reqIdRef.current) return // stale response
-        const rawRecords = Array.isArray(data?.records) ? data.records : []
+        const rawRecords = Array.isArray(data?.records) ? data.records : Array.isArray(data?.data) ? data.data : []
         const records = rawRecords
           .map(normalizeAuditRecord)
           .filter(Boolean)
