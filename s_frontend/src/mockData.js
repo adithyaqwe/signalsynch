@@ -8,7 +8,7 @@
 
 // ── Configuration ──────────────────────────────────────────────
 export const USE_MOCK = false; // Set to false when backend is live
-export const BACKEND_URL = 'http://localhost:5000';
+export const BACKEND_URL = import.meta.env.VITE_BACKEND_URL || 'http://localhost:5000';
 export const SSE_URL = `${BACKEND_URL}/stream`;
 export const POLL_URL = `${BACKEND_URL}/api/reconciliation`;
 export const AUDIT_URL = `${BACKEND_URL}/api/reconciliation`;

@@ -1,3 +1,4 @@
+import os
 from flask import Flask, request, jsonify
 import ml_service
 
@@ -58,5 +59,6 @@ def predict():
         return jsonify({"error": str(e)}), 500
 
 if __name__ == '__main__':
-    # Run on port 8000 as expected by Node.js
-    app.run(host='0.0.0.0', port=8000)
+    # Run on PORT env var if available, else 8000
+    port = int(os.environ.get('PORT', 8000))
+    app.run(host='0.0.0.0', port=port)
