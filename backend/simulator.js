@@ -6,8 +6,10 @@
 
 const axios = require('axios');
 
-const API_ENDPOINT = process.env.API_ENDPOINT || 'http://localhost:5000/api/events';
-const INTERVAL_MS = parseInt(process.env.INTERVAL_MS, 10) || 1200;
+const PORT = process.env.PORT || 5000;
+const API_ENDPOINT = process.env.API_ENDPOINT || `http://127.0.0.1:${PORT}/api/events`;
+// 100ms interval × 10 sensors in round-robin = 10 events/sec = 10Hz throughput
+const INTERVAL_MS = parseInt(process.env.INTERVAL_MS, 10) || 100;
 
 const SENSOR_BASELINES = {
   sensor_001: { base: 42.0, unit: 'celsius', label: 'Reactor Core Temp', range: 15 },
@@ -33,7 +35,8 @@ function gaussianNoise(sigma = 0.5) {
 
 let tickCount = 0;
 
-async function sendTick() {
+async function sendTick(targetEndpoint) {
+  const endpoint = targetEndpoint || API_ENDPOINT;
   const sensorId = SENSOR_KEYS[tickCount % SENSOR_KEYS.length];
   const config = SENSOR_BASELINES[sensorId];
   const now = new Date().toISOString();
@@ -75,7 +78,7 @@ async function sendTick() {
   }
 
   try {
-    const res = await axios.post(API_ENDPOINT, payload, { timeout: 3000 });
+    const res = await axios.post(endpoint, payload, { timeout: 3000 });
     const flag = isConflict ? '🚨 CONFLICT INJECTED' : '✅ CONSISTENT';
     console.log(`[Tick #${tickCount + 1}] ${sensorId} (${config.label}) | A: ${valA} | B: ${valB} | C: ${valC} ${config.unit} -> ${flag}`);
   } catch (err) {
@@ -85,23 +88,25 @@ async function sendTick() {
   tickCount++;
 }
 
-console.log('========================================================');
-console.log('📡 SignalSynch Telemetry Feed Simulator Started');
-console.log(`🎯 Target API: ${API_ENDPOINT}`);
-console.log(`⏱  Interval: ${INTERVAL_MS}ms across ${SENSOR_KEYS.length} industrial sensors`);
-console.log('========================================================\n');
+function startSimulator(customPort) {
+  const targetPort = customPort || process.env.PORT || 5000;
+  const endpoint = process.env.API_ENDPOINT || `http://127.0.0.1:${targetPort}/api/events`;
 
-// Run initial tick immediately, then interval
-sendTick();
-const interval = setInterval(sendTick, INTERVAL_MS);
+  console.log('========================================================');
+  console.log('📡 SignalSynch Telemetry Feed Simulator Started');
+  console.log(`🎯 Target API: ${endpoint}`);
+  console.log(`⏱  Interval: ${INTERVAL_MS}ms across ${SENSOR_KEYS.length} industrial sensors`);
+  console.log('========================================================\n');
 
-process.on('SIGINT', () => {
-  clearInterval(interval);
-  console.log('\n🛑 Simulator stopped gracefully.');
-  process.exit(0);
-});
+  // Initial delay then stream
+  setTimeout(() => {
+    sendTick(endpoint);
+    setInterval(() => sendTick(endpoint), INTERVAL_MS);
+  }, 2000);
+}
 
-process.on('SIGTERM', () => {
-  clearInterval(interval);
-  process.exit(0);
-});
+if (require.main === module) {
+  startSimulator();
+}
+
+module.exports = { startSimulator, SENSOR_BASELINES };

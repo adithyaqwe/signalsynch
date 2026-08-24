@@ -4,14 +4,20 @@ const alertService = require('./alertService');
 const { analyzeWithML } = require('./mlService');
 const { getIO } = require('../socket');
 const logger = require('../utils/logger');
+const metrics = require('../utils/metricsCollector');
 
 const runReconciliation = async (eventId, eventGroup) => {
   if (!eventGroup || eventGroup.length === 0) {
     throw new Error('No events provided for reconciliation');
   }
 
+  const t0 = process.hrtime.bigint();
+
   // 1. Run ML Analysis
+  const tMlStart = process.hrtime.bigint();
   const mlResult = await analyzeWithML(eventGroup);
+  const tMlEnd = process.hrtime.bigint();
+  const mlLatencyMs = Number(tMlEnd - tMlStart) / 1e6;
   
   // Emit ML Result
   try {
@@ -96,7 +102,10 @@ const runReconciliation = async (eventId, eventGroup) => {
     });
   }
   
+  const tSaveStart = process.hrtime.bigint();
   await reconciliation.save();
+  const tSaveEnd = process.hrtime.bigint();
+  const saveLatencyMs = Number(tSaveEnd - tSaveStart) / 1e6;
 
   // 4. Create Alert if needed
   if (status === 'CONFLICT_DETECTED' || requiresHumanReview) {
@@ -122,10 +131,28 @@ const runReconciliation = async (eventId, eventGroup) => {
     mlResult
   });
 
-  // Emit Result
+  // Measure total reconciliation latency
+  const tSocketStart = process.hrtime.bigint();
   try {
     getIO().emit('reconciliation-result', reconciliation);
   } catch(e) {}
+  const tSocketEnd = process.hrtime.bigint();
+  const socketLatencyMs = Number(tSocketEnd - tSocketStart) / 1e6;
+
+  const totalLatencyMs = Number(process.hrtime.bigint() - t0) / 1e6;
+  const decisionLatencyMs = totalLatencyMs - mlLatencyMs - saveLatencyMs - socketLatencyMs;
+
+  const latencyMs = {
+    mlInference: parseFloat(mlLatencyMs.toFixed(2)),
+    decisionLogic: parseFloat(decisionLatencyMs.toFixed(2)),
+    dbWrite: parseFloat(saveLatencyMs.toFixed(2)),
+    socketEmit: parseFloat(socketLatencyMs.toFixed(2)),
+    total: parseFloat(totalLatencyMs.toFixed(2))
+  };
+
+  reconciliation.latencyMs = latencyMs;
+  metrics.recordReconciliation(latencyMs);
+  logger.info(`[Perf] Reconciliation ${eventId} | ML: ${latencyMs.mlInference}ms | Decision: ${latencyMs.decisionLogic}ms | DB: ${latencyMs.dbWrite}ms | Socket: ${latencyMs.socketEmit}ms | TOTAL: ${latencyMs.total}ms`);
 
   return reconciliation;
 };

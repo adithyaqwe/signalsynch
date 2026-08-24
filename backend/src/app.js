@@ -4,6 +4,7 @@ require('dotenv').config();
 
 const errorHandler = require('./middleware/errorHandler');
 const notFound = require('./middleware/notFound');
+const metricsCollector = require('./utils/metricsCollector');
 
 // Routes
 const eventRoutes = require('./routes/eventRoutes');
@@ -34,6 +35,15 @@ app.use('/api/events', eventRoutes);
 app.use('/api/reconciliation', reconciliationRoutes);
 app.use('/api/alerts', alertRoutes);
 app.use('/api/audit-logs', auditRoutes);
+
+// Performance Metrics
+app.get('/api/metrics', (req, res) => {
+  res.status(200).json({
+    success: true,
+    message: 'Live performance metrics',
+    data: metricsCollector.getSnapshot()
+  });
+});
 
 // Error Handling
 app.use(notFound);

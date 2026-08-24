@@ -3,8 +3,10 @@ const { normalizeEvent } = require('../services/normalizationService');
 const { runReconciliation } = require('../services/reconciliationService');
 const { getIO } = require('../socket');
 const logger = require('../utils/logger');
+const metrics = require('../utils/metricsCollector');
 
 const receiveEvent = async (req, res, next) => {
+  const tIngest = process.hrtime.bigint();
   try {
     const payloads = Array.isArray(req.body) ? req.body : [req.body];
     const normalizedEvents = payloads.map(normalizeEvent);
@@ -42,6 +44,9 @@ const receiveEvent = async (req, res, next) => {
         }
       });
     }
+
+    const ingestLatencyMs = Number(process.hrtime.bigint() - tIngest) / 1e6;
+    savedEvents.forEach(() => metrics.recordIngestion(ingestLatencyMs / savedEvents.length));
 
     res.status(201).json({
       success: true,
